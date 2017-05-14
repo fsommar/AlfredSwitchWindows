@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 class WindowInfoDict : Searchable, ProcessNameProtocol {
@@ -23,7 +24,9 @@ class WindowInfoDict : Searchable, ProcessNameProtocol {
         return self.dictItem(key: "kCGWindowOwnerName", defaultValue: "")
     }
     
-    var pid : Int {
+    var bundleURL: URL?
+
+    var pid : pid_t {
         return self.dictItem(key: "kCGWindowOwnerPID", defaultValue: -1)
     }
     
@@ -76,10 +79,18 @@ class WindowInfoDict : Searchable, ProcessNameProtocol {
 struct Windows {
     static var all : [WindowInfoDict] {
         get {
-            guard let wl = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) else {
+            guard let wl = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) else {
                 return []
             }
-            
+            let runningApps = NSWorkspace.shared()
+                .runningApplications
+                .filter { $0.activationPolicy == .regular }
+                .reduce([pid_t : NSRunningApplication]()) { (acc, x) in
+                    var dict = acc
+                    dict[x.processIdentifier] = x
+                    return dict
+            }
+
             return (0..<CFArrayGetCount(wl)).flatMap { (i : Int) -> [WindowInfoDict] in
                 guard let windowInfoRef = CFArrayGetValueAtIndex(wl, i) else {
                     return []
@@ -88,10 +99,10 @@ struct Windows {
                 let wi = WindowInfoDict(rawDict: windowInfoRef)
                 
                 // We don't want to clutter our output with unnecessary windows that we can't switch to anyway.
-                guard wi.name.characters.count > 0 && !wi.isProbablyMenubarItem && wi.isVisible else {
+                guard let app = runningApps[wi.pid], !wi.isProbablyMenubarItem && wi.isVisible else {
                     return []
                 }
-                
+                wi.bundleURL = app.bundleURL
                 return [wi]
             }
         }
